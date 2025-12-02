@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>高压稳定测试 (无崩溃版)</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #0f0;
+            font-family: 'Consolas', monospace;
+            overflow: hidden;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            cursor: progress; /* 鼠标变成加载圈，增加心理压力 */
+        }
+        
+        #controls {
+            z-index: 100;
+            text-align: center;
+            background: rgba(0,0,0,0.8);
+            padding: 20px;
+            border: 1px solid #333;
+        }
+
+        button {
+            padding: 15px 40px;
+            font-size: 20px;
+            background: #d00;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        button:hover { background: #f00; }
+
+        #stats {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #888;
+        }
+
+        .particle {
+            position: absolute;
+            font-size: 20px;
+            pointer-events: none;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <h1>CPU & GPU 压力测试 (防崩溃版)</h1>
+        <p>此模式将强制降低 FPS 并满载 CPU，但保持内存循环回收。</p>
+        <button onclick="startLagEngine()">⚡ 确认并开始运行 ⚡</button>
+        <div id="stats">等待启动...</div>
+    </div>
+
+    <script>
+        let isRunning = false;
+        
+        function startLagEngine() {
+            if(isRunning) return;
+            isRunning = true;
+            document.querySelector('h1').innerText = "系统资源已被占用";
+            document.querySelector('p').innerText = "尝试移动鼠标，你会感觉到明显的延迟。";
+            
+            // 1. 启动 Web Workers (填满多核 CPU)
+            const cores = navigator.hardwareConcurrency || 8;
+            const workerScript = `
+                self.onmessage = () => {
+                    while(true) {
+                        // 复杂的三角函数运算，只烧 CPU，不吃内存
+                        Math.sin(Math.random()) * Math.tan(Math.random());
+                    }
+                }
+            `;
+            const blob = new Blob([workerScript], {type: 'application/javascript'});
+            const url = URL.createObjectURL(blob);
+            
+            for(let i=0; i<cores; i++) {
+                new Worker(url).postMessage('run');
+            }
+
+            // 2. 启动主线程阻塞器 (造成 UI 卡顿的核心)
+            renderLoop();
+        }
+
+        function renderLoop() {
+            const start = performance.now();
+            
+            // --- 核心卡顿逻辑 ---
+            
+            // 1. 强制阻塞主线程 X 毫秒
+            // 浏览器通常试图以 16ms (60fps) 刷新。
+            // 我们强制让它在 JS 里卡住 200ms，这样 FPS 会降到 5 左右。
+            // 这比死循环好，因为它允许浏览器有一瞬间去处理"活着"的信号，防止崩溃。
+            while (performance.now() - start < 200) {
+                // 做一些无意义的 DOM 计算来阻塞 UI 线程
+                document.body.getBoundingClientRect(); 
+            }
+
+            // 2. 内存抖动 (Memory Churn)
+            // 创建大量对象然后立即让它们失去引用。
+            // 这会强制触发垃圾回收(GC)，导致微卡顿，但不会内存溢出。
+            let trash = [];
+            for(let i=0; i<50000; i++) {
+                trash.push({x: Math.random(), y: Math.random()});
+            }
+            trash = null; // 立即释放，等待 GC 介入
+
+            // 3. 视觉干扰
+            createChaos();
+
+            // 更新状态文字
+            document.getElementById('stats').innerText = 
+                `CPU 核心满载: 100%\n当前帧延迟: ${(performance.now() - start).toFixed(0)}ms\nFPS: < 5`;
+
+            // 请求下一帧 (只要这个还在跑，浏览器就不会认为页面死了)
+            requestAnimationFrame(renderLoop);
+        }
+
+        function createChaos() {
+            // 简单的视觉效果，因为主线程被阻塞，这些动画会像幻灯片一样卡
+            const div = document.createElement('div');
+            div.className = 'particle';
+            div.innerText = Math.random() > 0.5 ? '1' : '0';
+            div.style.left = Math.random() * window.innerWidth + 'px';
+            div.style.top = Math.random() * window.innerHeight + 'px';
+            div.style.color = `rgb(${Math.random()*255}, 255, 0)`;
+            document.body.appendChild(div);
+
+            // 保持 DOM 数量恒定，防止内存泄漏
+            if (document.body.children.length > 500) {
+                // 删除最早生成的 10 个节点
+                for(let i=0; i<10; i++) {
+                    const node = document.body.querySelector('.particle');
+                    if(node) document.body.removeChild(node);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
